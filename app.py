@@ -257,10 +257,19 @@ def make_pdf(df, columns, mines, stats, anomalies, settings, chart_type, shown, 
         pdf_text(pdf, "No anomalies found with the current settings.")
     return bytes(pdf.output())
 
-st.title("Weyland-Yutani Mines Dashboard")
+st.set_page_config(page_title="Weyland-Yutani Mines", page_icon="⛏️", layout="wide")
 
-if st.button("Refresh data"):
+st.sidebar.title("Weyland-Yutani Mines")
+if st.sidebar.button("Refresh data"):
     load_data.clear()
+
+st.sidebar.header("Anomaly detection settings")
+settings = {}
+settings["iqr_k"] = st.sidebar.slider("IQR rule: k", 0.5, 3.0, 1.5, 0.1)
+settings["z_threshold"] = st.sidebar.slider("Z-score: threshold", 1.0, 5.0, 2.5, 0.1)
+settings["ma_window"] = st.sidebar.slider("Moving average: window, days", 3, 45, 21)
+settings["ma_percent"] = st.sidebar.slider("Moving average: max distance, %", 5, 100, 40)
+settings["grubbs_alpha"] = st.sidebar.selectbox("Grubbs' test: alpha", [0.01, 0.05, 0.1], index=1)
 
 df = load_data()
 mines = list(df.columns)
@@ -272,60 +281,63 @@ colors = {}
 for i in range(len(columns)):
     colors[columns[i]] = qualitative.Plotly[i % 10]
 
-st.write(f"Loaded {len(df)} days for {len(mines)} mines: {', '.join(mines)}")
-
-st.sidebar.header("Anomaly detection settings")
-settings = {}
-settings["iqr_k"] = st.sidebar.slider("IQR rule: k", 0.5, 3.0, 1.5, 0.1)
-settings["z_threshold"] = st.sidebar.slider("Z-score: threshold", 1.0, 5.0, 2.5, 0.1)
-settings["ma_window"] = st.sidebar.slider("Moving average: window, days", 3, 45, 21)
-settings["ma_percent"] = st.sidebar.slider("Moving average: max distance, %", 5, 100, 40)
-settings["grubbs_alpha"] = st.sidebar.selectbox("Grubbs' test: alpha", [0.01, 0.05, 0.1], index=1)
-
 anomalies = {}
 for column in columns:
     anomalies[column] = find_anomalies(df[column], settings)
 
 stats = calculate_statistics(df, columns)
+start = df["Date"].min().date()
+end = df["Date"].max().date()
 
-st.subheader("Statistics")
-st.dataframe(stats)
+st.title("Weyland-Yutani Mines Dashboard")
+st.caption(f"Daily resource output from {start} to {end}. Mines: {', '.join(mines)}")
 
-st.subheader("Chart")
-chart_type = st.radio("Chart type", ["Line", "Bar", "Stacked"], horizontal=True)
-degree = st.selectbox("Trendline: polynomial degree", [1, 2, 3, 4])
-if chart_type == "Stacked":
-    st.caption("Stacked chart shows all mines on top of each other. Trendline and anomalies are shown for Total.")
-    shown = mines
-else:
-    shown = st.multiselect("Show", columns, default=mines)
+col1, col2, col3, col4 = st.columns(4)
+col1.metric("Mines", len(mines))
+col2.metric("Days", len(df))
+col3.metric("Average total output per day", f"{stats.loc['Total', 'Mean']:.0f}")
+col4.metric("Anomaly days in Total", int(anomalies["Total"].any(axis=1).sum()))
 
-if len(shown) > 0:
-    st.plotly_chart(make_chart(df, chart_type, shown, mines, degree, anomalies, colors))
-else:
-    st.info("Choose at least one mine to show.")
+tab1, tab2, tab3, tab4 = st.tabs(["Chart", "Statistics", "Anomalies", "Data"])
 
-st.subheader("Anomalies found (number of days)")
-summary = pd.DataFrame()
-for column in columns:
-    summary[column] = anomalies[column].sum()
-st.dataframe(summary.T)
+with tab1:
+    chart_type = st.radio("Chart type", ["Line", "Bar", "Stacked"], horizontal=True)
+    degree = st.selectbox("Trendline: polynomial degree", [1, 2, 3, 4])
+    if chart_type == "Stacked":
+        st.caption("Stacked chart shows all mines on top of each other. Trendline and anomalies are shown for Total.")
+        shown = mines
+    else:
+        shown = st.multiselect("Show", columns, default=mines)
+    if len(shown) > 0:
+        st.plotly_chart(make_chart(df, chart_type, shown, mines, degree, anomalies, colors))
+    else:
+        st.info("Choose at least one mine to show.")
 
-selected = st.selectbox("Show anomaly days for", columns)
-flags = anomalies[selected]
-is_anomaly = flags.any(axis=1)
-details = df.loc[is_anomaly, ["Date", selected]].copy()
-details["Found by"] = flags[is_anomaly].apply(methods_list, axis=1)
-details["Date"] = details["Date"].dt.date
-st.dataframe(details, hide_index=True)
+with tab2:
+    st.subheader("Statistics for each mine and total")
+    st.dataframe(stats)
 
-st.subheader("PDF report")
+with tab3:
+    st.subheader("Anomalies found (number of days)")
+    summary = pd.DataFrame()
+    for column in columns:
+        summary[column] = anomalies[column].sum()
+    st.dataframe(summary.T)
+    selected = st.selectbox("Show anomaly days for", columns)
+    flags = anomalies[selected]
+    is_anomaly = flags.any(axis=1)
+    details = df.loc[is_anomaly, ["Date", selected]].copy()
+    details["Found by"] = flags[is_anomaly].apply(methods_list, axis=1)
+    details["Date"] = details["Date"].dt.date
+    st.dataframe(details, hide_index=True)
+
+with tab4:
+    st.dataframe(df, hide_index=True, column_config={"Date": st.column_config.DateColumn(format="YYYY-MM-DD")})
+
+st.sidebar.header("PDF report")
 report_shown = shown
 if len(report_shown) == 0:
     report_shown = mines
-if st.button("Generate PDF report"):
+if st.sidebar.button("Generate PDF report"):
     pdf_bytes = make_pdf(df, columns, mines, stats, anomalies, settings, chart_type, report_shown, degree, colors)
-    st.download_button("Download PDF", pdf_bytes, file_name="mines_report.pdf", mime="application/pdf")
-
-st.subheader("Data")
-st.dataframe(df, column_config={"Date": st.column_config.DateColumn(format="YYYY-MM-DD")})
+    st.sidebar.download_button("Download PDF", pdf_bytes, file_name="mines_report.pdf", mime="application/pdf")
