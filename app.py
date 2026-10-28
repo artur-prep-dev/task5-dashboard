@@ -5,7 +5,6 @@ SHEET_ID = "1FDinnIuiVAEOikZAPueHZ_nBFCc87F5mFCL7G9f_Z0c"
 DATA_GID = "40828864"
 CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={DATA_GID}"
 
-
 @st.cache_data
 def load_data():
     df = pd.read_csv(CSV_URL)
@@ -15,6 +14,16 @@ def load_data():
     return df
 
 
+def calculate_statistics(df, columns):
+    stats = pd.DataFrame({
+        "Mean": df[columns].mean(),
+        "Std": df[columns].std(),
+        "Median": df[columns].median(),
+        "IQR": df[columns].quantile(0.75) - df[columns].quantile(0.25),
+    })
+    return stats.round(1)
+
+
 st.title("Weyland-Yutani Mines Dashboard")
 
 if st.button("Refresh data"):
@@ -22,7 +31,14 @@ if st.button("Refresh data"):
 
 df = load_data()
 mines = [column for column in df.columns if column != "Date"]
+df["Total"] = df[mines].sum(axis=1)
+columns = mines + ["Total"]
 
 st.write(f"Loaded {len(df)} days for {len(mines)} mines: {', '.join(mines)}")
+
+st.subheader("Statistics")
+st.dataframe(calculate_statistics(df, columns))
+
+st.subheader("Data")
 st.dataframe(df)
 st.line_chart(df, x="Date", y=mines)
